@@ -82,13 +82,6 @@ async def webhook(
     From: str = Form(...),
     Body: str = Form(...),
 ):
-    # Validate Twilio signature
-    if WEBHOOK_URL:
-        params = dict(await request.form())
-        signature = request.headers.get("X-Twilio-Signature", "")
-        if not validate_twilio_signature(WEBHOOK_URL, params, signature):
-            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
-
     # Whitelist check — silent reject for unknown numbers
     if From != ALLOWED_NUMBER:
         return Response(content="<Response/>", media_type="application/xml")

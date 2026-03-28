@@ -223,6 +223,97 @@ def _git_status(repo_path: str) -> str:
         return f"Error getting git status: {type(e).__name__}: {e}"
 
 
+async def _list_my_github_repos() -> str:
+    try:
+        results = []
+        page = 1
+        async with httpx.AsyncClient() as client:
+            while True:
+                resp = await client.get(
+                    "https://api.github.com/user/repos",
+                    params={"per_page": 100, "page": page, "sort": "updated", "affiliation": "owner"},
+                    headers={
+                        "Authorization": f"Bearer {GITHUB_TOKEN}",
+                        "Accept": "application/vnd.github.v3+json",
+                    },
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                repos = resp.json()
+                if not repos:
+                    break
+                for r in repos:
+                    visibility = "private" if r["private"] else "public"
+                    results.append(f"{r['full_name']}  [{visibility}]  {r['description'] or ''}")
+                if len(repos) < 100:
+                    break
+                page += 1
+        return "\n".join(results) if results else "No repos found."
+    except httpx.HTTPStatusError as e:
+        return f"GitHub API error {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        return f"Error listing GitHub repos: {type(e).__name__}: {e}"
+
+
+async def _get_github_file(repo: str, path: str, branch: str = None) -> str:
+    """Read a file directly from GitHub without cloning."""
+    try:
+        url = f"https://api.github.com/repos/{repo}/contents/{path}"
+        params = {}
+        if branch:
+            params["ref"] = branch
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                params=params,
+                headers={
+                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github.v3+json",
+                },
+                timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("encoding") == "base64":
+                import base64
+                content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+                lines = content.splitlines()
+                if len(lines) > MAX_FILE_LINES:
+                    content = "\n".join(lines[:MAX_FILE_LINES]) + f"\n...[truncated at {MAX_FILE_LINES} lines]"
+                return f"File: {repo}/{path}\n{content}"
+            return f"Unexpected encoding: {data.get('encoding')}"
+    except httpx.HTTPStatusError as e:
+        return f"GitHub API error {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        return f"Error getting file: {type(e).__name__}: {e}"
+
+
+async def _search_github_repos(query: str) -> str:
+    """Search your GitHub repos by name or description."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.github.com/search/repositories",
+                params={"q": f"{query} user:{GITHUB_USERNAME}", "per_page": 20, "sort": "updated"},
+                headers={
+                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github.v3+json",
+                },
+                timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for r in data.get("items", []):
+                visibility = "private" if r["private"] else "public"
+                results.append(f"{r['full_name']}  [{visibility}]  {r['description'] or ''}")
+            return "\n".join(results) if results else "No matching repos found."
+    except httpx.HTTPStatusError as e:
+        return f"GitHub API error {e.response.status_code}: {e.response.text}"
+    except Exception as e:
+        return f"Error searching repos: {type(e).__name__}: {e}"
+
+
 def _list_repos() -> str:
     try:
         if not os.path.exists(REPOS_DIR):
@@ -256,6 +347,9 @@ TOOL_MAP = {
     "create_pull_request": _create_pull_request,
     "git_status": _git_status,
     "list_repos": _list_repos,
+    "list_my_github_repos": _list_my_github_repos,
+    "get_github_file": _get_github_file,
+    "search_github_repos": _search_github_repos,
 }
 
 
@@ -435,6 +529,38 @@ TOOL_DEFINITIONS = [
         "input_schema": {
             "type": "object",
             "properties": {},
+        },
+    },
+    {
+        "name": "list_my_github_repos",
+        "description": "List all GitHub repositories owned by the user, sorted by most recently updated.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "get_github_file",
+        "description": "Read a file directly from a GitHub repository without cloning it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo in 'owner/name' format"},
+                "path": {"type": "string", "description": "File path within the repo e.g. 'src/main.py'"},
+                "branch": {"type": "string", "description": "Branch or commit SHA. Defaults to default branch."},
+            },
+            "required": ["repo", "path"],
+        },
+    },
+    {
+        "name": "search_github_repos",
+        "description": "Search the user's GitHub repositories by name or description.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+            },
+            "required": ["query"],
         },
     },
 ]
