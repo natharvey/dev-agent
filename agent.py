@@ -169,6 +169,26 @@ async def _maybe_summarise(history: list) -> list:
     ] + recent
 
 
+async def _explain_error(error: str) -> str:
+    """Use Haiku to turn a raw error into a plain English explanation with a suggested fix."""
+    try:
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"A dev agent got this error: {error}\n\n"
+                    "In 2-3 sentences, explain what went wrong in plain English and suggest one specific fix. "
+                    "Be direct, no fluff."
+                )
+            }]
+        )
+        return resp.content[0].text
+    except Exception:
+        return f"Something went wrong: {error}"
+
+
 def reset_session(from_number: str) -> None:
     sessions.pop(from_number, None)
     _save_sessions(sessions)
@@ -250,8 +270,8 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
                 return f"Unexpected stop reason: {response.stop_reason}. Try again."
 
     except anthropic.RateLimitError:
-        return "Rate limit hit and retries exhausted. Try again in a minute or send /reset to start fresh."
+        return "Rate limit hit and retries exhausted. Wait a minute then try again, or send /reset to clear history and reduce token usage."
     except anthropic.APIStatusError as e:
-        return f"API error {e.status_code}: {e.message}"
+        return await _explain_error(f"Anthropic API error {e.status_code}: {e.message}")
     except Exception as e:
-        return f"Something went wrong: {type(e).__name__}: {e}"
+        return await _explain_error(f"{type(e).__name__}: {e}")
