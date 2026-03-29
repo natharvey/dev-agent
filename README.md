@@ -109,6 +109,7 @@ Dev: Fixed the assertion in test_auth.py, committed a3f2b1c and pushed to main.
 Dev can work on his own codebase — just ask him via WhatsApp.
 
 - [ ] Persistent conversation history (survives server restarts)
+- [ ] Conversation history summarisation — compress old turns into a short summary to reduce token usage on long sessions
 - [ ] `create_github_issue` and `get_github_issues` tools
 - [ ] Image/screenshot support — send a screenshot of a bug, Dev fixes it
 - [ ] `/status` command — uptime, active repos, current task
