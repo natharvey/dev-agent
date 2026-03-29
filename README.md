@@ -104,6 +104,18 @@ You: fix it and push
 Dev: Fixed the assertion in test_auth.py, committed a3f2b1c and pushed to main.
 ```
 
+## Roadmap
+
+Dev can work on his own codebase — just ask him via WhatsApp.
+
+- [ ] Persistent conversation history (survives server restarts)
+- [ ] `create_github_issue` and `get_github_issues` tools
+- [ ] Image/screenshot support — send a screenshot of a bug, Dev fixes it
+- [ ] `/status` command — uptime, active repos, current task
+- [ ] Auto-start on boot via launchd (Mac Mini)
+- [ ] Static webhook URL via custom domain + dynamic DNS (Mac Mini)
+- [ ] Proactive notifications — Dev messages you when a long task finishes
+
 ## Stack
 
 - [Claude](https://anthropic.com) — claude-opus-4-6 with tool use
