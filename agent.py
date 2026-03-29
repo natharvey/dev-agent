@@ -1,3 +1,4 @@
+import json
 import os
 
 import anthropic
@@ -8,6 +9,7 @@ from tools import TOOL_DEFINITIONS, execute_tool
 load_dotenv()
 
 REPOS_DIR = os.path.expanduser(os.getenv("REPOS_DIR", "./repos"))
+SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
 
 client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -25,8 +27,49 @@ Guidelines:
 - Use list_files and search_code to orient yourself in unfamiliar repos before making changes.
 - Keep responses short enough to read comfortably on a phone screen."""
 
+def _serialize_content(content) -> list | str:
+    """Convert Anthropic SDK content blocks to plain JSON-serializable dicts."""
+    if isinstance(content, str):
+        return content
+    result = []
+    for block in content:
+        if isinstance(block, dict):
+            result.append(block)
+        elif hasattr(block, "type"):
+            if block.type == "text":
+                result.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                result.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
+            elif block.type == "tool_result":
+                result.append({"type": "tool_result", "tool_use_id": block.tool_use_id, "content": block.content})
+            elif block.type == "thinking":
+                result.append({"type": "thinking", "thinking": block.thinking})
+    return result
+
+
+def _serialize_history(history: list) -> list:
+    return [{"role": msg["role"], "content": _serialize_content(msg["content"])} for msg in history]
+
+
+def _load_sessions() -> dict[str, list]:
+    try:
+        with open(SESSIONS_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_sessions(sessions: dict) -> None:
+    try:
+        serializable = {k: _serialize_history(v) for k, v in sessions.items()}
+        with open(SESSIONS_FILE, "w") as f:
+            json.dump(serializable, f)
+    except Exception:
+        pass  # never crash the agent over a save failure
+
+
 # In-memory conversation history keyed by phone number
-sessions: dict[str, list] = {}
+sessions: dict[str, list] = _load_sessions()
 
 # Track which users are currently being processed
 processing: set[str] = set()
@@ -127,6 +170,7 @@ async def _maybe_summarise(history: list) -> list:
 
 def reset_session(from_number: str) -> None:
     sessions.pop(from_number, None)
+    _save_sessions(sessions)
 
 
 def is_processing(from_number: str) -> bool:
@@ -147,6 +191,7 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
     history = await _maybe_summarise(history)
     sessions[from_number] = _prune_history(history)
     history = sessions[from_number]
+    _save_sessions(sessions)
 
     try:
         while True:
@@ -187,6 +232,7 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
                             }
                         )
                 history.append({"role": "user", "content": tool_results})
+                _save_sessions(sessions)
                 # Loop back — Claude will see the results and continue
 
             elif response.stop_reason == "max_tokens":
