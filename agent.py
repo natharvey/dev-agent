@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -195,7 +196,9 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
 
     try:
         while True:
-            response = await client.messages.create(
+            for attempt in range(3):
+                try:
+                    response = await client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=8096,
                 system=[
@@ -205,10 +208,15 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                tools=TOOL_DEFINITIONS,
-                messages=history,
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
-            )
+                    tools=TOOL_DEFINITIONS,
+                    messages=history,
+                    extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+                )
+                    break
+                except anthropic.RateLimitError:
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(60)
 
             # Always append full response.content to preserve tool_use blocks
             history.append({"role": "assistant", "content": response.content})
@@ -241,6 +249,8 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
             else:
                 return f"Unexpected stop reason: {response.stop_reason}. Try again."
 
+    except anthropic.RateLimitError:
+        return "Rate limit hit and retries exhausted. Try again in a minute or send /reset to start fresh."
     except anthropic.APIStatusError as e:
         return f"API error {e.status_code}: {e.message}"
     except Exception as e:
