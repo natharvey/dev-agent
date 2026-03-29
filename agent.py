@@ -35,6 +35,31 @@ processing: set[str] = set()
 MAX_HISTORY_MESSAGES = 40  # ~20 turns
 
 
+def _is_user_text_message(msg: dict) -> bool:
+    """True if this is a regular user text message (not a tool_result block)."""
+    if msg["role"] != "user":
+        return False
+    content = msg["content"]
+    if isinstance(content, str):
+        return True
+    if isinstance(content, list):
+        return not any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+        )
+    return False
+
+
+def _prune_history(history: list) -> list:
+    """Remove oldest complete turn, never splitting tool_use/tool_result pairs."""
+    if len(history) <= MAX_HISTORY_MESSAGES:
+        return history
+    # Find the second user text message — everything before it is safe to drop
+    for i in range(1, len(history)):
+        if _is_user_text_message(history[i]):
+            return history[i:]
+    return history
+
+
 def reset_session(from_number: str) -> None:
     sessions.pop(from_number, None)
 
@@ -54,11 +79,8 @@ async def process_message(from_number: str, user_text: str) -> str:
 async def _run_agent_loop(from_number: str, user_text: str) -> str:
     history = sessions.setdefault(from_number, [])
     history.append({"role": "user", "content": user_text})
-
-    # Prune oldest message pairs if history is too long
-    while len(history) > MAX_HISTORY_MESSAGES:
-        history.pop(0)
-        history.pop(0)
+    sessions[from_number] = _prune_history(history)
+    history = sessions[from_number]
 
     try:
         while True:
