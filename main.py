@@ -1,3 +1,4 @@
+import datetime
 import os
 
 from dotenv import load_dotenv
@@ -28,10 +29,12 @@ twilio_validator = RequestValidator(TWILIO_AUTH_TOKEN)
 
 app = FastAPI()
 
+START_TIME = datetime.datetime.now()
 WHATSAPP_MAX_LEN = 1500
 
 HELP_TEXT = """Dev Agent — available commands:
 /reset — clear conversation history
+/status — show uptime, repos, and current state
 /help — show this message
 
 Otherwise, just talk to me. I can:
@@ -44,6 +47,39 @@ Otherwise, just talk to me. I can:
 
 Example: "clone https://github.com/you/myapp and run the tests"
 """
+
+
+def _get_status(from_number: str) -> str:
+    uptime = datetime.datetime.now() - START_TIME
+    hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+    minutes = remainder // 60
+    uptime_str = f"{hours}h {minutes}m" if hours else f"{minutes}m"
+
+    # List cloned repos
+    repos = []
+    if os.path.exists(REPOS_DIR):
+        for name in sorted(os.listdir(REPOS_DIR)):
+            full_path = os.path.join(REPOS_DIR, name)
+            if os.path.isdir(full_path) and os.path.exists(os.path.join(full_path, ".git")):
+                try:
+                    import git
+                    branch = git.Repo(full_path).active_branch.name
+                    repos.append(f"  • {name} [{branch}]")
+                except Exception:
+                    repos.append(f"  • {name}")
+
+    repos_str = "\n".join(repos) if repos else "  (none)"
+    busy = "busy" if agent.is_processing(from_number) else "idle"
+    history_len = len(agent.sessions.get(from_number, [])) // 2
+
+    return (
+        f"Dev status\n"
+        f"Uptime: {uptime_str}\n"
+        f"State: {busy}\n"
+        f"Conversation: {history_len} turns\n"
+        f"Model: claude-sonnet-4-6\n"
+        f"Repos:\n{repos_str}"
+    )
 
 
 def send_whatsapp(to: str, body: str) -> None:
@@ -100,6 +136,8 @@ async def webhook(
             background_tasks.add_task(send_whatsapp, From, "Conversation cleared.")
         elif cmd == "/help":
             background_tasks.add_task(send_whatsapp, From, HELP_TEXT)
+        elif cmd == "/status":
+            background_tasks.add_task(send_whatsapp, From, _get_status(From))
         else:
             background_tasks.add_task(send_whatsapp, From, f"Unknown command: {cmd}. Try /help.")
         return Response(content="<Response/>", media_type="application/xml")
