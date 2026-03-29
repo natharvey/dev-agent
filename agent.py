@@ -87,9 +87,16 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
             response = await client.messages.create(
                 model="claude-opus-4-6",
                 max_tokens=8096,
-                system=SYSTEM_PROMPT,
+                system=[
+                    {
+                        "type": "text",
+                        "text": SYSTEM_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 tools=TOOL_DEFINITIONS,
                 messages=history,
+                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
             )
 
             # Always append full response.content to preserve tool_use blocks
