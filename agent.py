@@ -151,7 +151,7 @@ async def _run_agent_loop(from_number: str, user_text: str) -> str:
     try:
         while True:
             response = await client.messages.create(
-                model="claude-opus-4-6",
+                model="claude-sonnet-4-6",
                 max_tokens=8096,
                 system=[
                     {
