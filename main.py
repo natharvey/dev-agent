@@ -15,7 +15,11 @@ load_dotenv()
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "")
-ALLOWED_NUMBER = os.getenv("ALLOWED_WHATSAPP_NUMBER", "")
+ALLOWED_NUMBERS = {
+    n.strip()
+    for n in os.getenv("ALLOWED_WHATSAPP_NUMBERS", os.getenv("ALLOWED_WHATSAPP_NUMBER", "")).split(",")
+    if n.strip()
+}
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 REPOS_DIR = os.path.expanduser(os.getenv("REPOS_DIR", "./repos"))
 
@@ -83,7 +87,7 @@ async def webhook(
     Body: str = Form(...),
 ):
     # Whitelist check — silent reject for unknown numbers
-    if From != ALLOWED_NUMBER:
+    if From not in ALLOWED_NUMBERS:
         return Response(content="<Response/>", media_type="application/xml")
 
     message = Body.strip()
