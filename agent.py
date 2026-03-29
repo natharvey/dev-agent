@@ -1,4 +1,3 @@
-import json
 import os
 
 import anthropic
@@ -33,6 +32,8 @@ sessions: dict[str, list] = {}
 processing: set[str] = set()
 
 MAX_HISTORY_MESSAGES = 40  # ~20 turns
+SUMMARISE_THRESHOLD = 12  # summarise when history exceeds this many messages
+KEEP_RECENT = 6  # always keep last N messages verbatim
 
 
 def _is_user_text_message(msg: dict) -> bool:
@@ -60,6 +61,70 @@ def _prune_history(history: list) -> list:
     return history
 
 
+def _history_to_text(history: list) -> str:
+    """Convert history to readable text for summarisation."""
+    parts = []
+    for msg in history:
+        role = msg["role"]
+        content = msg["content"]
+        if isinstance(content, str):
+            parts.append(f"{role}: {content[:500]}")
+        elif isinstance(content, list):
+            for block in content:
+                if hasattr(block, "text") and block.text:
+                    parts.append(f"{role}: {block.text[:500]}")
+                elif isinstance(block, dict):
+                    if block.get("type") == "text":
+                        parts.append(f"{role}: {block['text'][:500]}")
+                    elif block.get("type") == "tool_use":
+                        parts.append(f"[tool call: {block['name']}]")
+                    elif block.get("type") == "tool_result":
+                        parts.append(f"[tool result: {str(block.get('content', ''))[:200]}]")
+    return "\n".join(parts)
+
+
+async def _maybe_summarise(history: list) -> list:
+    """Compress old history into a summary when it gets too long."""
+    if len(history) <= SUMMARISE_THRESHOLD:
+        return history
+
+    # Find a safe split point: last user text message before the recent window
+    split_at = None
+    for i in range(len(history) - KEEP_RECENT - 1, 0, -1):
+        if _is_user_text_message(history[i]):
+            split_at = i
+            break
+
+    if not split_at or split_at < 2:
+        return history
+
+    to_summarise = history[:split_at]
+    recent = history[split_at:]
+
+    try:
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Summarise this dev agent conversation concisely. "
+                    "Include: tasks completed, files changed, repos cloned, "
+                    "commit SHAs, PR URLs, errors encountered, and current state. Be specific.\n\n"
+                    + _history_to_text(to_summarise)
+                )
+            }]
+        )
+        summary = resp.content[0].text
+    except Exception:
+        return history  # if summarisation fails, keep history as-is
+
+    return [
+        {"role": "user", "content": f"[Earlier conversation summary: {summary}]"},
+        {"role": "assistant", "content": [{"type": "text", "text": "Understood, I have context from our earlier work."}]},
+    ] + recent
+
+
 def reset_session(from_number: str) -> None:
     sessions.pop(from_number, None)
 
@@ -79,6 +144,7 @@ async def process_message(from_number: str, user_text: str) -> str:
 async def _run_agent_loop(from_number: str, user_text: str) -> str:
     history = sessions.setdefault(from_number, [])
     history.append({"role": "user", "content": user_text})
+    history = await _maybe_summarise(history)
     sessions[from_number] = _prune_history(history)
     history = sessions[from_number]
 
